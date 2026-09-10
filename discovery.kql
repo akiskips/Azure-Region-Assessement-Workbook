@@ -1,0 +1,103 @@
+Resources
+| extend resourceType = tolower(type), resourceLocation = tolower(location)
+| where resourceLocation in~ ({SourceRegions}) or '*' in ({SourceRegions})
+    or isempty(resourceLocation) or resourceLocation == 'global'
+    or (resourceType == 'microsoft.documentdb/databaseaccounts' and replace_string(tolower(tostring(properties.locations)), ' ', '') has_any ({SourceRegions}))
+| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
+| extend service = case(
+    resourceType == 'microsoft.storage/storageaccounts', 'Storage',
+    resourceType in ('microsoft.recoveryservices/vaults', 'microsoft.dataprotection/backupvaults'), 'Backup',
+    resourceType in ('microsoft.sql/servers', 'microsoft.sql/servers/databases', 'microsoft.sql/managedinstances'), 'SQL',
+    resourceType == 'microsoft.keyvault/vaults', 'Key Vault',
+    resourceType == 'microsoft.documentdb/databaseaccounts', 'Cosmos DB',
+    resourceType in ('microsoft.dbforpostgresql/flexibleservers', 'microsoft.dbformysql/flexibleservers'), 'PostgreSQL / MySQL',
+    resourceType in ('microsoft.eventhub/namespaces', 'microsoft.servicebus/namespaces'), 'Messaging',
+    resourceType == 'microsoft.containerregistry/registries', 'Container Registry',
+    resourceType == 'microsoft.apimanagement/service', 'API Management',
+    'Outside automated coverage')
+| where service != 'Outside automated coverage'
+| where '{Service}' == 'All' or service == '{Service}'
+| extend storageSku = tostring(sku.name),
+    currentSqlBackup = tostring(properties.currentBackupStorageRedundancy),
+    requestedSqlBackup = tostring(properties.requestedBackupStorageRedundancy),
+    recoveryVaultRedundancy = tostring(properties.redundancySettings.standardTierStorageRedundancy),
+    recoveryVaultCrr = tostring(properties.redundancySettings.crossRegionRestore),
+    backupVaultStorage = tostring(properties.storageSettings),
+    backupVaultCrr = tostring(properties.featureSettings.crossRegionRestoreSettings.state),
+    flexibleGeoBackup = tostring(properties.backup.geoRedundantBackup),
+    flexibleReplicaRole = tostring(properties.replicationRole),
+    flexibleSource = tostring(properties.sourceServerResourceId)
+| extend detected = case(
+    service == 'Storage', storageSku in~ ('Standard_GRS', 'Standard_RAGRS', 'Standard_GZRS', 'Standard_RAGZRS'),
+    resourceType == 'microsoft.recoveryservices/vaults', recoveryVaultRedundancy =~ 'GeoRedundant' or recoveryVaultCrr =~ 'Enabled',
+    resourceType == 'microsoft.dataprotection/backupvaults', backupVaultStorage contains '"GeoRedundant"' or backupVaultCrr =~ 'Enabled',
+    service == 'SQL', currentSqlBackup in~ ('Geo', 'GeoZone'),
+    service == 'Cosmos DB', array_length(properties.locations) > 1,
+    service == 'PostgreSQL / MySQL', flexibleGeoBackup =~ 'Enabled' or isnotempty(flexibleSource) or flexibleReplicaRole in~ ('Replica', 'AsyncReplica', 'GeoAsyncReplica'),
+    service == 'Messaging', array_length(properties.geoDataReplication.locations) > 1,
+    service == 'API Management', array_length(properties.additionalLocations) > 0,
+    false)
+| extend evidence = case(
+    detected, 'Detected configuration',
+    service == 'Key Vault', 'Documented service behavior',
+    'Needs verification')
+| where '{Evidence}' == 'All' or evidence == '{Evidence}'
+| extend pairedConfigurationDetected = case(
+    service == 'Key Vault', 'Not exposed - service-managed',
+    service == 'PostgreSQL / MySQL', iff(flexibleGeoBackup =~ 'Enabled', 'Yes', 'Not detected - verify'),
+    service in ('Storage', 'Backup', 'SQL'), iff(detected, 'Yes', 'Not detected - verify'),
+    'Not applicable')
+| extend pairedRegionConfiguration = case(
+    service == 'Storage', case(
+        storageSku =~ 'Standard_GRS', 'GRS',
+        storageSku =~ 'Standard_RAGRS', 'RA-GRS',
+        storageSku =~ 'Standard_GZRS', 'GZRS',
+        storageSku =~ 'Standard_RAGZRS', 'RA-GZRS',
+        'GRS / RA-GRS / GZRS / RA-GZRS (not detected)'),
+    resourceType == 'microsoft.recoveryservices/vaults', case(
+        recoveryVaultRedundancy =~ 'GeoRedundant' and recoveryVaultCrr =~ 'Enabled', 'Geo-redundant backup storage + Cross Region Restore (CRR)',
+        recoveryVaultRedundancy =~ 'GeoRedundant', 'Geo-redundant backup storage',
+        recoveryVaultCrr =~ 'Enabled', 'Cross Region Restore (CRR)',
+        'Geo-redundant backup storage / CRR (not detected)'),
+    resourceType == 'microsoft.dataprotection/backupvaults', case(
+        backupVaultStorage contains '"GeoRedundant"' and backupVaultCrr =~ 'Enabled', 'Geo-redundant backup storage + Cross Region Restore (CRR)',
+        backupVaultStorage contains '"GeoRedundant"', 'Geo-redundant backup storage',
+        backupVaultCrr =~ 'Enabled', 'Cross Region Restore (CRR)',
+        'Geo-redundant backup storage / CRR (not detected)'),
+    service == 'SQL', case(
+        currentSqlBackup =~ 'Geo', 'Geo-redundant backups (Geo / GRS)',
+        currentSqlBackup =~ 'GeoZone', 'Geo-zone-redundant backups (GeoZone / GZRS)',
+        'Geo / GeoZone backup redundancy (not detected)'),
+    service == 'Key Vault', 'Service-managed replication (regional exceptions; no customer setting)',
+    service == 'PostgreSQL / MySQL', iff(flexibleGeoBackup =~ 'Enabled', 'Geo-redundant backups', 'Geo-redundant backups (not detected; read replicas are separate)'),
+    'No fixed region-pair configuration identified')
+| extend pairingModel = case(
+    service == 'Storage', 'Fixed pair for GRS / GZRS',
+    service == 'Backup', 'Paired backup replication; workload-specific CRR',
+    service == 'SQL', 'Paired geo-backups; customer-selected SQL replicas',
+    service == 'Key Vault', 'Service-managed replication; regional exceptions',
+    service == 'PostgreSQL / MySQL', 'Paired geo-backups; separate replica topology',
+    'Customer-selected regions / configuration')
+| extend observedConfiguration = case(
+    service == 'Storage', strcat('sku=', storageSku, '; primary=', tostring(properties.primaryLocation), '; secondary=', tostring(properties.secondaryLocation), '; secondaryStatus=', tostring(properties.statusOfSecondary)),
+    resourceType == 'microsoft.recoveryservices/vaults', strcat('redundancy=', recoveryVaultRedundancy, '; CRR=', recoveryVaultCrr),
+    resourceType == 'microsoft.dataprotection/backupvaults', strcat('storageSettings=', backupVaultStorage, '; CRR=', backupVaultCrr, '; replicatedRegions=', tostring(properties.replicatedRegions)),
+    service == 'SQL', strcat('currentBackup=', currentSqlBackup, '; requestedBackup=', requestedSqlBackup, '; zoneRedundant=', tostring(properties.zoneRedundant), '; DB role=', tostring(properties.secondaryType), '; failover groups / replication links REQUIRE service API'),
+    service == 'Key Vault', 'No customer-configured replication flag. Verify current Key Vault reliability guidance; do not apply this rule to Managed HSM.',
+    service == 'Cosmos DB', strcat('locations=', tostring(properties.locations), '; failoverOrder=', tostring(properties.failoverPolicies), '; automaticFailover=', tostring(properties.enableAutomaticFailover), '; multiWrite=', tostring(properties.enableMultipleWriteLocations)),
+    service == 'PostgreSQL / MySQL', strcat('geoBackup=', flexibleGeoBackup, '; replicaRole=', flexibleReplicaRole, '; sourceServer=', flexibleSource, '; HA=', tostring(properties.highAvailability.mode)),
+    service == 'Messaging', strcat('geoDataReplication=', tostring(properties.geoDataReplication), '; Geo-DR alias and partner REQUIRE service API'),
+    service == 'API Management', strcat('additionalLocations=', tostring(properties.additionalLocations), '; sku=', storageSku),
+    'Registry replication child resources REQUIRE service API; resource existence does not prove geo-replication.')
+| extend nextAction = case(
+    service == 'Storage', 'Verify observed secondary, replication lag, endpoints, encryption, immutability and copy/cutover method. The paired secondary cannot be freely selected.',
+    service == 'Backup', 'Read vault redundancy/CRR via service API; inventory protected items and recovery points. Validate target workload support, restore access, retention and protection gap.',
+    service == 'SQL', 'Enumerate failover groups and every database replication link; verify current vs requested backup redundancy, partner subscriptions, listeners, TDE keys and target compatibility.',
+    service == 'Key Vault', 'Confirm failover limitations and key/secret continuity; validate subscription/geography restore constraints and private endpoints.',
+    service == 'Cosmos DB', 'Inspect ALL configured locations, write region, failover priorities, consistency, SDK preferred regions and replica transition.',
+    service == 'PostgreSQL / MySQL', 'Verify geo-backup create-time constraints, restore destinations, replicas, extension/version parity and application reconnection.',
+    service == 'Messaging', 'Identify metadata-only Geo-DR vs data replication; check messages/events, offsets, identities, network rules, aliases and promotion semantics.',
+    service == 'API Management', 'Verify SKU-specific multi-region support, gateway locations, certificates, backends and shared dependencies.',
+    'Enumerate registry replications and verify target support, image availability, pull access and private endpoints.')
+| project id, name, subscriptionId, resourceGroup, location, service, resourceType,
+    evidence, pairedConfigurationDetected, pairedRegionConfiguration, pairingModel, observedConfiguration, nextAction

@@ -1,0 +1,27 @@
+RecoveryServicesResources
+| where type in~ (
+    'microsoft.recoveryservices/vaults/backupfabrics/protectioncontainers/protecteditems',
+    'microsoft.dataprotection/backupvaults/backupinstances',
+    'microsoft.recoveryservices/vaults/replicationfabrics/replicationprotectioncontainers/replicationprotecteditems')
+| extend vaultId = tolower(case(
+    tolower(id) contains '/backupfabrics/', tostring(split(tolower(id), '/backupfabrics/')[0]),
+    tolower(id) contains '/backupinstances/', tostring(split(tolower(id), '/backupinstances/')[0]),
+    tostring(split(tolower(id), '/replicationfabrics/')[0])))
+| extend protectionKind = iff(tolower(type) contains '/replicationprotecteditems', 'Site Recovery', 'Backup')
+| join kind=leftouter (
+    Resources
+    | where type in~ ('microsoft.recoveryservices/vaults', 'microsoft.dataprotection/backupvaults')
+    | project vaultId = tolower(id), vaultName = name, vaultLocation = tolower(location)
+    ) on vaultId
+| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
+| where '*' in ({SourceRegions}) or vaultLocation in~ ({SourceRegions}) or isempty(vaultLocation)
+    or tostring(properties.providerSpecificDetails.primaryFabricLocation) in~ ({SourceRegions})
+    or tostring(properties.providerSpecificDetails.recoveryFabricLocation) in~ ({SourceRegions})
+| project id, name, subscriptionId, resourceGroup, protectionKind, vaultName, vaultLocation,
+    sourceResource = coalesce(tostring(properties.sourceResourceId), tostring(properties.dataSourceInfo.resourceID), tostring(properties.providerSpecificDetails.fabricObjectId)),
+    policyId = coalesce(tostring(properties.policyId), tostring(properties.policyInfo.policyId)),
+    protectionState = coalesce(tostring(properties.protectionState), tostring(properties.currentProtectionState)),
+    lastBackupTime = tostring(properties.lastBackupTime),
+    replicationHealth = tostring(properties.replicationHealth),
+    sourceRegion = tostring(properties.providerSpecificDetails.primaryFabricLocation),
+    recoveryRegion = tostring(properties.providerSpecificDetails.recoveryFabricLocation)
