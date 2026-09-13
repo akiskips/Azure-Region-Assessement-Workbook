@@ -12,7 +12,7 @@ function New-TextItem([string]$Name, [string]$Text) {
     return $item
 }
 
-function New-QueryItem([string]$Name, [string]$Title, [string]$Query) {
+function New-QueryItem([string]$Name, [string]$Title, [string]$Query, [int]$Size = 0) {
     return @{
         type = 3
         name = $Name
@@ -20,7 +20,7 @@ function New-QueryItem([string]$Name, [string]$Title, [string]$Query) {
             version = 'KqlItem/1.0'
             title = $Title
             query = $Query
-            size = 0
+            size = $Size
             queryType = 1
             resourceType = 'microsoft.resourcegraph/resources'
             crossComponentResources = @('{Subscriptions}')
@@ -166,7 +166,7 @@ $items.Add((New-QueryItem 'candidate-count' 'Configuration discovery counts' ($d
 
 | summarize MatchingResources = count(), Detected = countif(evidence == 'Detected configuration'), DocumentedBehavior = countif(evidence == 'Documented service behavior'), NeedsVerification = countif(evidence == 'Needs verification')
 | extend DetailStatus = iff(MatchingResources > 1000, 'TRUNCATED: narrow subscriptions/resource groups and reconcile all partitions', 'Within 1000-row detail cap; access and indexing gaps still apply')
-'@)))
+'@) 1))
 $items.Add((New-QueryItem 'candidate-summary' 'Resources by service and evidence' ($discovery + @'
 
 | project name, service, evidence, ['Paired configuration detected'] = pairedConfigurationDetected, ['Paired-region configuration'] = pairedRegionConfiguration, id

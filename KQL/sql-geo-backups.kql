@@ -1,0 +1,13 @@
+Resources
+| where type in~ ('microsoft.sql/servers', 'microsoft.sql/servers/databases', 'microsoft.sql/managedinstances')
+| where location in~ ({SourceRegions}) or '*' in ({SourceRegions})
+    or isempty(location) or location =~ 'global'
+| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
+| extend currentSqlBackup = tostring(properties.currentBackupStorageRedundancy),
+    requestedSqlBackup = tostring(properties.requestedBackupStorageRedundancy)
+| where currentSqlBackup in~ ('Geo', 'GeoZone')
+| extend pairedRegionConfiguration = iff(currentSqlBackup =~ 'Geo',
+    'Geo-redundant backups (Geo / GRS)', 'Geo-zone-redundant backups (GeoZone / GZRS)')
+| project id, name, subscriptionId, resourceGroup, location, resourceType = tolower(type),
+    service = 'SQL', evidence = 'Detected configuration', pairedRegionConfiguration,
+    currentSqlBackup, requestedSqlBackup

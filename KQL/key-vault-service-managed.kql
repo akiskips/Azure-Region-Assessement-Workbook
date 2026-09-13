@@ -1,0 +1,9 @@
+Resources
+| where type =~ 'microsoft.keyvault/vaults'
+| where location in~ ({SourceRegions}) or '*' in ({SourceRegions})
+    or isempty(location) or location =~ 'global'
+| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
+| project id, name, subscriptionId, resourceGroup, location,
+    service = 'Key Vault', evidence = 'Documented service behavior',
+    pairedRegionConfiguration = 'Service-managed replication (regional exceptions; no customer setting)',
+    nextAction = 'Verify current Key Vault reliability guidance and regional exceptions; resource existence does not prove replication or recoverability.'
