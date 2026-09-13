@@ -12,16 +12,16 @@ These read-only Azure Resource Graph queries are separate, per-service filters b
 
 ## Parameters and Scope
 
-The queries retain the workbook's `{SourceRegions}` and `{ResourceGroups}` multi-select placeholders. In a workbook Resource Graph query step, use the existing parameters and bind the subscription scope to the workbook's Subscriptions parameter. Each file fixes the service and evidence category, so it does not use the Service or Evidence controls.
+All queries run directly in Resource Graph Explorer without placeholder replacement. Select subscriptions in the portal before running them; use the same subscriptions as the workbook when comparing results. By default, they include all regions and resource groups in that subscription scope. To narrow a query, insert filters after the resource-type filter, for example:
 
-For Resource Graph Explorer, select subscriptions in the portal and replace every placeholder with single-quoted values:
+```kusto
+| where location in~ ('northeurope', 'westeurope') or isempty(location) or location =~ 'global'
+| where resourceGroup in~ ('rg-app', 'rg-data')
+```
 
-| Placeholder | Example | All values |
-| --- | --- | --- |
-| `{SourceRegions}` | `'northeurope', 'westeurope'` | `'*'` |
-| `{ResourceGroups}` | `'rg-app', 'rg-data'` | `'*'` |
+When using these files in a workbook Resource Graph query step, bind the subscription scope to the workbook's Subscriptions parameter. These standalone queries do not automatically apply the workbook's region or resource-group parameters. Each file fixes the service and evidence category, so it does not use the Service or Evidence controls. Workbook placeholders such as `{SourceRegions}` and `{ResourceGroups}` cannot be used directly in Resource Graph Explorer; unresolved placeholders cause `ParserFailure` errors at the `{` token.
 
-Location filtering retains global and unlocated resources, matching the workbook convention. It screens indexed resource locations, not secondary regions or protected workload locations. The planned target region does not filter these queries or validate a restore destination.
+The optional location filter above retains global and unlocated resources, matching the workbook convention. It screens indexed resource locations, not secondary regions or protected workload locations. The planned target region does not filter these queries or validate a restore destination.
 
 ## Interpretation
 

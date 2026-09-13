@@ -1,8 +1,5 @@
-Resources
+resources
 | where type in~ ('microsoft.dbforpostgresql/flexibleservers', 'microsoft.dbformysql/flexibleservers')
-| where location in~ ({SourceRegions}) or '*' in ({SourceRegions})
-    or isempty(location) or location =~ 'global'
-| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
 | extend flexibleGeoBackup = tostring(properties.backup.geoRedundantBackup)
 | where flexibleGeoBackup =~ 'Enabled'
 | project id, name, subscriptionId, resourceGroup, location, resourceType = tolower(type),

@@ -1,8 +1,5 @@
 Resources
 | where type in~ ('microsoft.sql/servers', 'microsoft.sql/servers/databases', 'microsoft.sql/managedinstances')
-| where location in~ ({SourceRegions}) or '*' in ({SourceRegions})
-    or isempty(location) or location =~ 'global'
-| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
 | extend currentSqlBackup = tostring(properties.currentBackupStorageRedundancy),
     requestedSqlBackup = tostring(properties.requestedBackupStorageRedundancy)
 | where currentSqlBackup in~ ('Geo', 'GeoZone')

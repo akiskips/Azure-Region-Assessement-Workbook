@@ -1,8 +1,5 @@
-Resources
+resources
 | where type =~ 'microsoft.storage/storageaccounts'
-| where location in~ ({SourceRegions}) or '*' in ({SourceRegions})
-    or isempty(location) or location =~ 'global'
-| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
 | extend storageSku = tostring(sku.name)
 | where storageSku in~ ('Standard_GRS', 'Standard_RAGRS', 'Standard_GZRS', 'Standard_RAGZRS')
 | extend pairedRegionConfiguration = case(

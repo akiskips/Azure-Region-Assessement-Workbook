@@ -1,8 +1,5 @@
-Resources
+resources
 | where type in~ ('microsoft.recoveryservices/vaults', 'microsoft.dataprotection/backupvaults')
-| where location in~ ({SourceRegions}) or '*' in ({SourceRegions})
-    or isempty(location) or location =~ 'global'
-| where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
 | extend resourceType = tolower(type),
     recoveryVaultRedundancy = tostring(properties.redundancySettings.standardTierStorageRedundancy),
     recoveryVaultCrr = tostring(properties.redundancySettings.crossRegionRestore),
