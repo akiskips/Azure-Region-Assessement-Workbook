@@ -35,15 +35,27 @@ Saving the workbook does not grant other viewers access to your resources. Each 
 | Subscriptions | Sets the subscription scope for Resource Graph queries. |
 | Source regions | Filters resources by their indexed location. Global and unlocated resources are retained. The paired-region view also considers Cosmos DB account locations; Backup and ASR queries also consider vault and indexed replication locations. |
 | Resource groups | Narrows the inventory and configuration queries. |
+| Tags (key = value) | Checkbox multi-select of indexed resource tag pairs in the selected subscriptions. **All** (the default) disables tag filtering, including for untagged resources. |
+| Match selected tags | **Any** (the default) matches at least one selected pair; **All** requires every selected pair on the same resource. |
 | View | Switches between **Discovery** and **Paired region specific services**. |
 | Services | Checkbox multi-select dropdown for the paired-region view. Select one or more services, or **All** (the default). |
 | Evidence | Filters only the paired-region view by detected configuration, documented behavior, or items needing verification. |
 
 There is no target-region selector. This workbook assesses existing resources and configuration evidence; it does not check destination service availability, SKU support, quota, or restore eligibility. Verify these separately for your intended destination.
 
+### Filter by Tags
+
+Tag filtering uses the checkbox picker only; custom key/value entry is not supported. Reimport the updated workbook JSON to add the tag controls to an existing workbook.
+
+Select tag pairs such as `environment = production` and `owner = platform`, then choose **Any** or **All** under **Match selected tags**. To select several values for one key, such as production or staging, use **Any**. Requiring both values with **All** normally returns no resources because a tag key has one value.
+
+Tag keys are matched case-insensitively and shown in lowercase; values are matched exactly, including case. Empty tag values are supported. Selecting **All** in the Tags picker turns filtering off regardless of the match mode. With specific pairs selected, untagged resources are excluded. Tags are read from the resource itself, not inherited from its subscription or resource group.
+
+The filter applies before counts and detail limits in both views. **Backup and ASR** uses vault tags, not tags on the protected workload; items without indexed matching vault tags are excluded when filtering is active. Subscription coverage remains independent of tag filters. Tag choices come from selected subscriptions and are not narrowed by the other controls; Resource Graph result limits and indexing can leave choices incomplete in large scopes.
+
 ### Discovery
 
-Review resource counts by region, type, and resource group, then inspect the resource inventory. The view also includes indexed backup items, Azure Site Recovery replication targets, and accessible subscriptions. Subscription coverage is independent of the source-region and resource-group filters.
+Review resource counts by region, type, and resource group, then inspect the resource inventory. The view also includes indexed backup items, Azure Site Recovery replication targets, and accessible subscriptions. Subscription coverage is independent of the source-region, resource-group, and tag filters.
 
 Use table filtering to inspect returned rows and the table's Excel export action to export them. The resource ID column is configured as an Azure resource link.
 
@@ -91,14 +103,14 @@ The [KQL query index](KQL/README.md) provides one read-only query for each of th
 3. Open a query from the index, paste its contents into the query editor, and select **Run query**.
 4. Review its evidence and configuration fields, then verify findings using the relevant service APIs.
 
-Standalone queries include all regions and resource groups in the selected subscription scope by default. See the index for optional filters and service-specific caveats. Storage, Backup, SQL and PostgreSQL/MySQL queries filter matching configuration signals; the other queries include inventory for service-managed recovery or further verification. Their results are therefore not always identical to the workbook's broader inventory.
+Standalone queries include all regions, resource groups, and tags in the selected subscription scope by default; workbook tag selections do not apply to them. See the index for optional filters and service-specific caveats. Storage, Backup, SQL and PostgreSQL/MySQL queries filter matching configuration signals; the other queries include inventory for service-managed recovery or further verification. Their results are therefore not always identical to the workbook's broader inventory.
 
 ## Limits and Troubleshooting
 
 - Detail tables are capped at **1,000 rows**. Count tables are calculated before that cap. Narrow subscriptions or resource groups and reconcile separate exports for larger inventories; table filtering cannot retrieve omitted rows.
 - Resource Graph indexing, access restrictions, and unavailable properties can leave gaps. A zero count is not proof that no resources or protection exist.
 - Resource location metadata is not a complete map of data residency, dependencies, replicas, or failover destinations.
-- Empty results: check subscription access, source regions, resource groups, and (in the paired-region view) Service and Evidence selections.
+- Empty results: check subscription access, source regions, resource groups, Tags and tag match mode, and (in the paired-region view) Service and Evidence selections.
 - Backup and ASR results require workload-level verification of recovery points, restore permissions, retention, and replication health.
 - Treat exported results as potentially sensitive inventory. Do not publish subscription details, resource identifiers, tags, or backup information without authorization.
 - Local workbook build and structural checks have passed. All 16 standalone queries passed Kusto syntax parsing and checks for workbook-placeholder absence and service coverage. These checks do not establish Azure Resource Graph runtime compatibility; live query execution and portal rendering have not been comprehensively validated.
@@ -111,6 +123,7 @@ Standalone queries include all regions and resource groups in the selected subsc
 | [Build-Workbook.ps1](Build-Workbook.ps1) | Workbook generator and source for layout, controls, and table definitions. |
 | [discovery.kql](discovery.kql) | Shared service-configuration discovery query. |
 | [backup-context.kql](backup-context.kql) | Backup and ASR discovery query. |
+| [tag-filter.kql](tag-filter.kql) | Shared tag-filter fragment inserted by the generator into resource and backup queries; not a standalone query. |
 | [KQL/README.md](KQL/README.md) | Index and usage guidance for 16 standalone per-service queries; these are not consumed by the workbook generator. |
 
 To customize the workbook, edit the generator or KQL sources, then run this command from the repository directory in PowerShell 7 or later:
@@ -119,7 +132,7 @@ To customize the workbook, edit the generator or KQL sources, then run this comm
 ./Build-Workbook.ps1
 ```
 
-This overwrites the generated workbook JSON. Reimport the updated JSON through Advanced Editor. The root-level [discovery.kql](discovery.kql) and [backup-context.kql](backup-context.kql) templates contain workbook parameter placeholders and require substitution before running them directly in Resource Graph Explorer. The standalone queries listed in [KQL/README.md](KQL/README.md) do not contain those placeholders. Changes to standalone queries do not update the workbook; keep corresponding service logic aligned when customizing either version.
+This overwrites the generated workbook JSON. Reimport the updated JSON through Advanced Editor. The generator expands the internal `{TagFilter}` and `{TagColumn}` markers using [tag-filter.kql](tag-filter.kql). The root-level [discovery.kql](discovery.kql) and [backup-context.kql](backup-context.kql) templates also contain workbook parameter placeholders; neither template runs directly in Resource Graph Explorer without expansion and substitution. The standalone queries listed in [KQL/README.md](KQL/README.md) do not contain those placeholders. Changes to standalone queries do not update the workbook; keep corresponding service logic aligned when customizing either version.
 
 ## References
 

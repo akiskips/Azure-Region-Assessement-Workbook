@@ -4,6 +4,7 @@ Resources
     or isempty(resourceLocation) or resourceLocation == 'global'
     or (resourceType == 'microsoft.documentdb/databaseaccounts' and replace_string(tolower(tostring(properties.locations)), ' ', '') has_any ({SourceRegions}))
 | where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
+{TagFilter}
 | extend service = case(
     resourceType == 'microsoft.storage/storageaccounts', 'Storage',
     resourceType in ('microsoft.recoveryservices/vaults', 'microsoft.dataprotection/backupvaults'), 'Backup',

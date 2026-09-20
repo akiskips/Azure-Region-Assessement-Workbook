@@ -11,12 +11,13 @@ RecoveryServicesResources
 | join kind=leftouter (
     Resources
     | where type in~ ('microsoft.recoveryservices/vaults', 'microsoft.dataprotection/backupvaults')
-    | project vaultId = tolower(id), vaultName = name, vaultLocation = tolower(location)
+    | project vaultId = tolower(id), vaultName = name, vaultLocation = tolower(location), vaultTags = tags
     ) on vaultId
 | where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
 | where '*' in ({SourceRegions}) or vaultLocation in~ ({SourceRegions}) or isempty(vaultLocation)
     or tostring(properties.providerSpecificDetails.primaryFabricLocation) in~ ({SourceRegions})
     or tostring(properties.providerSpecificDetails.recoveryFabricLocation) in~ ({SourceRegions})
+{TagFilter}
 | project id, name, subscriptionId, resourceGroup, protectionKind, vaultName, vaultLocation,
     sourceResource = coalesce(tostring(properties.sourceResourceId), tostring(properties.dataSourceInfo.resourceID), tostring(properties.providerSpecificDetails.fabricObjectId)),
     policyId = coalesce(tostring(properties.policyId), tostring(properties.policyInfo.policyId)),

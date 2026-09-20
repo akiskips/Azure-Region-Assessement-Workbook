@@ -8,9 +8,10 @@ $pairedRegionServices = @(
     'Data Factory', 'Device Registry', 'Event Grid', 'IoT Hub', 'Notification Hubs',
     'Storage Actions', 'Storage Mover', 'Microsoft Fabric', 'App Service / Environment', 'AKS'
 )
-$discovery = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'discovery.kql') -Raw).Trim()
+$tagFilter = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'tag-filter.kql') -Raw).Trim()
+$discovery = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'discovery.kql') -Raw).Trim().Replace('{TagFilter}', $tagFilter.Replace('{TagColumn}', 'tags'))
 $discovery += "`n| where service in ('$($pairedRegionServices -join "', '")')"
-$backup = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'backup-context.kql') -Raw).Trim()
+$backup = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'backup-context.kql') -Raw).Trim().Replace('{TagFilter}', $tagFilter.Replace('{TagColumn}', 'vaultTags'))
 
 function New-TextItem([string]$Name, [string]$Text) {
     $item = @{ type = 1; name = $Name; content = @{ json = $Text } }
@@ -85,6 +86,17 @@ Resources
 | where '*' in ({SourceRegions}) or location in~ ({SourceRegions}) or isempty(location) or location =~ 'global'
 | where '*' in ({ResourceGroups}) or resourceGroup in~ ({ResourceGroups})
 '@
+$scopeQuery += "`n$($tagFilter.Replace('{TagColumn}', 'tags'))"
+
+$tagPickerQuery = @'
+Resources
+| mv-expand kind=array tags limit 2000
+| extend tagKey = tolower(tostring(tags[0])), tagValue = tostring(tags[1])
+| where isnotempty(tagKey)
+| project value = strcat(base64_encode_tostring(tagKey), ':', base64_encode_tostring(tagValue)), label = strcat(tagKey, ' = ', tagValue)
+| distinct value, label
+| order by label asc
+'@
 
 $items = [System.Collections.Generic.List[object]]::new()
 $items.Add((New-TextItem 'title' @'
@@ -114,6 +126,8 @@ $items.Add(@{
             }
             (New-ScopedPicker 'SourceRegions' 'Source regions' 'Resources | where isnotempty(location) | project value = tolower(location), label = tolower(location) | distinct value, label | order by label asc')
             (New-ScopedPicker 'ResourceGroups' 'Resource groups' 'Resources | where isnotempty(resourceGroup) | project value = resourceGroup, label = resourceGroup | distinct value, label | order by label asc')
+            (New-ScopedPicker 'Tags' 'Tags (key = value)' $tagPickerQuery)
+            (New-Choice 'TagMatch' 'Match selected tags' @('Any', 'All') 'Any')
             (New-Choice 'View' 'View' @('Discovery', 'Paired region specific services') 'Discovery')
             @{
                 id = 'Service'
@@ -139,7 +153,7 @@ $items.Add(@{
 $items.Add((New-TextItem 'inventory-warning' @'
 ## Discovery
 
-All indexed resource types in the selected subscription, source-region, and resource-group scope. Global and unlocated resources are retained. Location is resource metadata, not a complete map of replicas or dependencies.
+All indexed resource types in the selected subscription, source-region, resource-group, and tag scope. Global and unlocated resources are retained. Location is resource metadata, not a complete map of replicas or dependencies.
 
 **Detail limit: 1,000 rows.** Counts are calculated before the cap; larger inventories require narrower subscription or resource-group scopes. Access and indexing gaps can still apply.
 '@))
@@ -185,7 +199,7 @@ $items.Add((New-QueryItem 'candidate-detail' 'Resource configurations and requir
 $items.Add((New-TextItem 'backup-warning' @'
 ## Backup and ASR
 
-Protected items and replication targets in the selected subscription, source-region, and resource-group scope. Service/Evidence filters do not apply. Region screening uses vault and indexed ASR source/recovery regions; missing vault locations are retained.
+Protected items and replication targets in the selected subscription, source-region, resource-group, and vault-tag scope. Tag filters apply to the vault, not the protected workload. Service/Evidence filters do not apply. Region screening uses vault and indexed ASR source/recovery regions; missing vault locations are retained when tag filtering is off.
 
 A vault may protect workloads in other regions. These rows do not prove geo-redundancy or successful restore. Blank fields require service-level verification. **Detail limit: 1,000 rows.**
 '@))
@@ -195,7 +209,7 @@ $items.Add((New-QueryItem 'backup-detail' 'Backup items and ASR replication targ
 $items.Add((New-TextItem 'coverage-warning' @'
 ## Coverage
 
-Subscription access in the selected scope, independent of source-region, resource-group, and Service/Evidence filters. Missing subscriptions and resources may indicate access or indexing gaps; a zero count does not prove absence.
+Subscription access in the selected scope, independent of source-region, resource-group, tag, and Service/Evidence filters. Missing subscriptions and resources may indicate access or indexing gaps; a zero count does not prove absence.
 '@))
 $items.Add((New-QueryItem 'subscription-scope' 'Accessible subscriptions in selected scope' @'
 ResourceContainers

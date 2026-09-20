@@ -1,0 +1,7 @@
+| extend tagFilterEntries = iff('*' in ({Tags}), dynamic([null]), {TagColumn})
+| mv-expand kind=array tagFilterEntries limit 2000
+| extend tagFilterToken = strcat(base64_encode_tostring(tolower(tostring(tagFilterEntries[0]))), ':', base64_encode_tostring(tostring(tagFilterEntries[1])))
+| where '*' in ({Tags}) or tagFilterToken in ({Tags})
+| summarize tagFilterMatches = make_set(tagFilterToken), arg_max(id, *) by id
+| where '*' in ({Tags}) or '{TagMatch}' == 'Any' or array_length(tagFilterMatches) == array_length(dynamic([{Tags}]))
+| project-away tagFilterEntries, tagFilterToken, tagFilterMatches
