@@ -11,12 +11,22 @@ Resources
     resourceType == 'microsoft.keyvault/vaults', 'Key Vault',
     resourceType == 'microsoft.documentdb/databaseaccounts', 'Cosmos DB',
     resourceType in ('microsoft.dbforpostgresql/flexibleservers', 'microsoft.dbformysql/flexibleservers'), 'PostgreSQL / MySQL',
+    resourceType == 'microsoft.datafactory/factories', 'Data Factory',
+    resourceType in ('microsoft.deviceregistry/namespaces', 'microsoft.deviceregistry/assets', 'microsoft.deviceregistry/assetendpointprofiles', 'microsoft.deviceregistry/schemaregistries'), 'Device Registry',
+    resourceType in ('microsoft.eventgrid/topics', 'microsoft.eventgrid/domains', 'microsoft.eventgrid/systemtopics') and kind !~ 'AzureArc', 'Event Grid',
+    resourceType == 'microsoft.devices/iothubs', 'IoT Hub',
+    resourceType == 'microsoft.notificationhubs/namespaces', 'Notification Hubs',
+    resourceType == 'microsoft.storageactions/storagetasks', 'Storage Actions',
+    resourceType == 'microsoft.storagemover/storagemovers', 'Storage Mover',
+    resourceType == 'microsoft.fabric/capacities', 'Microsoft Fabric',
+    resourceType in ('microsoft.web/sites', 'microsoft.web/hostingenvironments') and kind !contains 'functionapp', 'App Service / Environment',
+    resourceType == 'microsoft.containerservice/managedclusters', 'AKS',
     resourceType in ('microsoft.eventhub/namespaces', 'microsoft.servicebus/namespaces'), 'Messaging',
     resourceType == 'microsoft.containerregistry/registries', 'Container Registry',
     resourceType == 'microsoft.apimanagement/service', 'API Management',
     'Outside automated coverage')
 | where service != 'Outside automated coverage'
-| where '{Service}' == 'All' or service == '{Service}'
+| where '*' in ({Service}) or service in~ ({Service})
 | extend storageSku = tostring(sku.name),
     currentSqlBackup = tostring(properties.currentBackupStorageRedundancy),
     requestedSqlBackup = tostring(properties.requestedBackupStorageRedundancy),
@@ -26,24 +36,45 @@ Resources
     backupVaultCrr = tostring(properties.featureSettings.crossRegionRestoreSettings.state),
     flexibleGeoBackup = tostring(properties.backup.geoRedundantBackup),
     flexibleReplicaRole = tostring(properties.replicationRole),
-    flexibleSource = tostring(properties.sourceServerResourceId)
+    flexibleSource = tostring(properties.sourceServerResourceId),
+    cosmosBackupType = tostring(properties.backupPolicy.type),
+    cosmosBackupRedundancy = tostring(properties.backupPolicy.periodicModeProperties.backupStorageRedundancy),
+    eventGridBoundary = tostring(properties.dataResidencyBoundary),
+    iotDataResidency = tostring(properties.enableDataResidency),
+    notificationReplicationRegion = tostring(properties.replicationRegion)
+| extend cosmosGeoBackup = cosmosBackupType =~ 'Periodic' and cosmosBackupRedundancy =~ 'Geo'
 | extend detected = case(
     service == 'Storage', storageSku in~ ('Standard_GRS', 'Standard_RAGRS', 'Standard_GZRS', 'Standard_RAGZRS'),
     resourceType == 'microsoft.recoveryservices/vaults', recoveryVaultRedundancy =~ 'GeoRedundant' or recoveryVaultCrr =~ 'Enabled',
     resourceType == 'microsoft.dataprotection/backupvaults', backupVaultStorage contains '"GeoRedundant"' or backupVaultCrr =~ 'Enabled',
     service == 'SQL', currentSqlBackup in~ ('Geo', 'GeoZone'),
-    service == 'Cosmos DB', array_length(properties.locations) > 1,
+    service == 'Cosmos DB', cosmosGeoBackup or array_length(properties.locations) > 1,
     service == 'PostgreSQL / MySQL', flexibleGeoBackup =~ 'Enabled' or isnotempty(flexibleSource) or flexibleReplicaRole in~ ('Replica', 'AsyncReplica', 'GeoAsyncReplica'),
+    resourceType in ('microsoft.eventgrid/topics', 'microsoft.eventgrid/domains'), eventGridBoundary =~ 'WithinGeopair',
+    service == 'Notification Hubs', notificationReplicationRegion in~ ('Default', 'AustraliaEast', 'BrazilSouth', 'NorthEurope', 'SouthAfricaNorth', 'SouthEastAsia', 'WestUs2'),
     service == 'Messaging', array_length(properties.geoDataReplication.locations) > 1,
     service == 'API Management', array_length(properties.additionalLocations) > 0,
     false)
+| extend documentedBehavior = service in ('Key Vault', 'Device Registry', 'Storage Mover')
+    or (service == 'Data Factory' and resourceLocation !in ('brazilsouth', 'southeastasia'))
+    or (service == 'IoT Hub' and iotDataResidency !~ 'true')
+    or resourceType == 'microsoft.eventgrid/systemtopics'
 | extend evidence = case(
     detected, 'Detected configuration',
-    service == 'Key Vault', 'Documented service behavior',
+    documentedBehavior, 'Documented service behavior',
     'Needs verification')
 | where '{Evidence}' == 'All' or evidence == '{Evidence}'
 | extend pairedConfigurationDetected = case(
-    service == 'Key Vault', 'Not exposed - service-managed',
+    service == 'Data Factory' and resourceLocation in ('brazilsouth', 'southeastasia'), 'Not supported in this region',
+    service == 'IoT Hub' and iotDataResidency =~ 'true', 'No - DR opted out',
+    documentedBehavior, 'Not exposed - service-managed; verify region support',
+    service == 'Cosmos DB', iff(cosmosGeoBackup, 'Yes', 'Not detected - verify'),
+    service == 'Event Grid', iff(detected, 'Yes', 'Not detected - verify'),
+    service == 'Notification Hubs', case(
+        notificationReplicationRegion =~ 'Default', 'Configured - verify region support',
+        detected, 'Not established - verify selected region',
+        'Not detected - verify'),
+    service in ('Storage Actions', 'Microsoft Fabric', 'App Service / Environment', 'AKS'), 'Not assessed - verify dependencies / service settings',
     service == 'PostgreSQL / MySQL', iff(flexibleGeoBackup =~ 'Enabled', 'Yes', 'Not detected - verify'),
     service in ('Storage', 'Backup', 'SQL'), iff(detected, 'Yes', 'Not detected - verify'),
     'Not applicable')
@@ -69,14 +100,39 @@ Resources
         currentSqlBackup =~ 'GeoZone', 'Geo-zone-redundant backups (GeoZone / GZRS)',
         'Geo / GeoZone backup redundancy (not detected)'),
     service == 'Key Vault', 'Service-managed replication (regional exceptions; no customer setting)',
+    service == 'Cosmos DB', iff(cosmosGeoBackup, 'Periodic geo-redundant backups', 'Periodic geo-redundant backups (not detected; account replicas are separate)'),
     service == 'PostgreSQL / MySQL', iff(flexibleGeoBackup =~ 'Enabled', 'Geo-redundant backups', 'Geo-redundant backups (not detected; read replicas are separate)'),
+    service == 'Data Factory', 'Microsoft-managed metadata failover (paired regions except Brazil South and Southeast Asia)',
+    service == 'Device Registry', 'Microsoft-managed data replication and failover to the paired region',
+    service == 'Event Grid', case(
+        resourceType == 'microsoft.eventgrid/systemtopics', 'Service-managed metadata Geo-DR (system topic; paired regions only)',
+        detected, 'Metadata Geo-DR (WithinGeopair; event data is not replicated)',
+        eventGridBoundary =~ 'WithinRegion', 'Regional metadata only (Geo-DR disabled)',
+        'Metadata Geo-DR (not detected; verify data residency boundary)'),
+    service == 'IoT Hub', iff(iotDataResidency =~ 'true', 'Data residency enabled (paired-region DR disabled)', 'Service-managed paired-region replication (verify region support and DR opt-out)'),
+    service == 'Notification Hubs', case(
+        notificationReplicationRegion =~ 'Default', 'Metadata Geo-DR using default paired recovery region (verify support)',
+        notificationReplicationRegion =~ 'None', 'Metadata Geo-DR disabled',
+        detected, 'Metadata Geo-DR using a selected recovery region (pairing not established)',
+        'Metadata Geo-DR (not detected; verify recovery region)'),
+    service == 'Storage Actions', 'Task continuity follows target storage account geo-redundancy (not assessed)',
+    service == 'Storage Mover', 'Microsoft-managed configuration metadata replication to the paired region',
+    service == 'Microsoft Fabric', 'OneLake paired-region DR capacity setting (not exposed by this query)',
+    service == 'App Service / Environment', 'Custom backups to geo-redundant storage (backup configuration and storage not assessed)',
+    service == 'AKS', 'Vault-tier backups with paired-region restore (protection and vault settings not assessed)',
     'No fixed region-pair configuration identified')
 | extend pairingModel = case(
     service == 'Storage', 'Fixed pair for GRS / GZRS',
     service == 'Backup', 'Paired backup replication; workload-specific CRR',
     service == 'SQL', 'Paired geo-backups; customer-selected SQL replicas',
     service == 'Key Vault', 'Service-managed replication; regional exceptions',
+    service == 'Cosmos DB', 'Paired periodic geo-backups; customer-selected account replicas',
     service == 'PostgreSQL / MySQL', 'Paired geo-backups; separate replica topology',
+    service in ('Data Factory', 'Device Registry', 'Event Grid', 'IoT Hub', 'Storage Mover'), 'Service-managed paired-region recovery; verify regional eligibility',
+    service == 'Notification Hubs', 'Default Azure pair or selected flexible recovery region; metadata only',
+    service in ('Storage Actions', 'App Service / Environment'), 'Pairing inherited from dependent storage account',
+    service == 'Microsoft Fabric', 'Paired-region OneLake replication; capacity opt-in and service availability required',
+    service == 'AKS', 'Paired restore through Azure Backup Vault Tier; not cluster replication',
     'Customer-selected regions / configuration')
 | extend observedConfiguration = case(
     service == 'Storage', strcat('sku=', storageSku, '; primary=', tostring(properties.primaryLocation), '; secondary=', tostring(properties.secondaryLocation), '; secondaryStatus=', tostring(properties.statusOfSecondary)),
@@ -84,8 +140,18 @@ Resources
     resourceType == 'microsoft.dataprotection/backupvaults', strcat('storageSettings=', backupVaultStorage, '; CRR=', backupVaultCrr, '; replicatedRegions=', tostring(properties.replicatedRegions)),
     service == 'SQL', strcat('currentBackup=', currentSqlBackup, '; requestedBackup=', requestedSqlBackup, '; zoneRedundant=', tostring(properties.zoneRedundant), '; DB role=', tostring(properties.secondaryType), '; failover groups / replication links REQUIRE service API'),
     service == 'Key Vault', 'No customer-configured replication flag. Verify current Key Vault reliability guidance; do not apply this rule to Managed HSM.',
-    service == 'Cosmos DB', strcat('locations=', tostring(properties.locations), '; failoverOrder=', tostring(properties.failoverPolicies), '; automaticFailover=', tostring(properties.enableAutomaticFailover), '; multiWrite=', tostring(properties.enableMultipleWriteLocations)),
+    service == 'Cosmos DB', strcat('backupType=', cosmosBackupType, '; periodicBackupRedundancy=', cosmosBackupRedundancy, '; locations=', tostring(properties.locations), '; failoverOrder=', tostring(properties.failoverPolicies), '; automaticFailover=', tostring(properties.enableAutomaticFailover), '; multiWrite=', tostring(properties.enableMultipleWriteLocations)),
     service == 'PostgreSQL / MySQL', strcat('geoBackup=', flexibleGeoBackup, '; replicaRole=', flexibleReplicaRole, '; sourceServer=', flexibleSource, '; HA=', tostring(properties.highAvailability.mode)),
+    service == 'Data Factory', 'No customer replication flag. Core service metadata recovery does not establish integration runtime or linked data store recovery.',
+    service == 'Device Registry', 'Documented service-managed replication; no customer replication flag or replication health is assessed.',
+    service == 'Event Grid', strcat('dataResidencyBoundary=', eventGridBoundary, '; resourceType=', resourceType, '; metadata only; event payloads are not replicated'),
+    service == 'IoT Hub', strcat('enableDataResidency=', iotDataResidency, '; locations=', tostring(properties.locations), '; missing opt-out flag does not prove DR is enabled'),
+    service == 'Notification Hubs', strcat('replicationRegion=', notificationReplicationRegion, '; registrations and installations are not replicated'),
+    service == 'Storage Actions', 'Storage task inventory only. Assignments and target storage account redundancy REQUIRE service API verification.',
+    service == 'Storage Mover', 'Documented configuration metadata replication only; migrated data, source/target storage and agents have separate recovery requirements.',
+    service == 'Microsoft Fabric', strcat('sku=', storageSku, '; capacity inventory only; OneLake DR switch and workspace replication status REQUIRE Fabric admin verification'),
+    service == 'App Service / Environment', strcat('kind=', tostring(kind), '; custom backup schedule, recovery points and destination storage redundancy REQUIRE App Service API verification'),
+    service == 'AKS', 'Cluster inventory only. Backup instances, Vault Tier recovery points, vault geo-redundancy and CRR REQUIRE Azure Backup verification.',
     service == 'Messaging', strcat('geoDataReplication=', tostring(properties.geoDataReplication), '; Geo-DR alias and partner REQUIRE service API'),
     service == 'API Management', strcat('additionalLocations=', tostring(properties.additionalLocations), '; sku=', storageSku),
     'Registry replication child resources REQUIRE service API; resource existence does not prove geo-replication.')
@@ -94,8 +160,18 @@ Resources
     service == 'Backup', 'Read vault redundancy/CRR via service API; inventory protected items and recovery points. Validate target workload support, restore access, retention and protection gap.',
     service == 'SQL', 'Enumerate failover groups and every database replication link; verify current vs requested backup redundancy, partner subscriptions, listeners, TDE keys and target compatibility.',
     service == 'Key Vault', 'Confirm failover limitations and key/secret continuity; validate subscription/geography restore constraints and private endpoints.',
-    service == 'Cosmos DB', 'Inspect ALL configured locations, write region, failover priorities, consistency, SDK preferred regions and replica transition.',
+    service == 'Cosmos DB', 'Verify periodic backup redundancy and restore eligibility; a missing redundancy property does not confirm the Geo default. Inspect ALL account locations, write region, failover priorities, consistency and SDK preferred regions separately.',
     service == 'PostgreSQL / MySQL', 'Verify geo-backup create-time constraints, restore destinations, replicas, extension/version parity and application reconnection.',
+    service == 'Data Factory', 'Verify paired-region eligibility; Brazil South and Southeast Asia do not support Microsoft-managed regional failover. Review Azure IR auto-resolve, self-hosted/SSIS runtimes, networking and linked stores separately.',
+    service == 'Device Registry', 'Confirm current region support and paired-region recovery limitations; assess dependent IoT Hub / IoT Operations components separately.',
+    service == 'Event Grid', 'Verify paired-region support and Cross-Geo vs Regional setting through the service API. System topics are service-managed; namespaces are excluded. Protect event payloads with durable sources and dead-letter storage.',
+    service == 'IoT Hub', 'Verify region pairing and enableDataResidency opt-out, particularly in Brazil South and Southeast Asia. Review message loss, device reconnection and endpoint changes; failover is not permanent migration.',
+    service == 'Notification Hubs', 'Verify replicationRegion and whether the recovery region is the Azure pair or a flexible region. None disables metadata DR. Back up and test restoration of registrations and installations separately.',
+    service == 'Storage Actions', 'Enumerate task assignments and inspect each target storage account for GRS/GZRS. Verify task completion after storage failover and retry interrupted operations.',
+    service == 'Storage Mover', 'Verify paired-region eligibility, endpoint storage redundancy and agent recovery. Re-register agents after Microsoft-managed failover; metadata replication does not protect migrated data.',
+    service == 'Microsoft Fabric', 'Check the capacity DR switch and workspace OneLake geo-replication status in Fabric. Verify Fabric presence in the pair and tenant home-region dependencies; assess non-OneLake items and Power BI separately.',
+    service == 'App Service / Environment', 'Enumerate apps and custom backups, then verify destination storage geo-redundancy and restore support. Environment existence and automatic backups do not prove cross-region protection.',
+    service == 'AKS', 'Correlate the cluster with Backup vault instances and Vault Tier recovery points. Verify vault GRS, CRR, supported disks and target-region restore prerequisites; a backup extension alone is insufficient.',
     service == 'Messaging', 'Identify metadata-only Geo-DR vs data replication; check messages/events, offsets, identities, network rules, aliases and promotion semantics.',
     service == 'API Management', 'Verify SKU-specific multi-region support, gateway locations, certificates, backends and shared dependencies.',
     'Enumerate registry replications and verify target support, image availability, pull access and private endpoints.')

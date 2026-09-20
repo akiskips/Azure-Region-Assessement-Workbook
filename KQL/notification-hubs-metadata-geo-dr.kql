@@ -1,0 +1,20 @@
+resources
+| where type =~ 'microsoft.notificationhubs/namespaces'
+| extend resourceType = tolower(type),
+    replicationRegion = tostring(properties.replicationRegion)
+| extend detected = replicationRegion in~ ('Default', 'AustraliaEast', 'BrazilSouth', 'NorthEurope', 'SouthAfricaNorth', 'SouthEastAsia', 'WestUs2')
+| project id, name, subscriptionId, resourceGroup, location, resourceType,
+    service = 'Notification Hubs',
+    evidence = iff(detected, 'Detected configuration', 'Needs verification'),
+    pairedConfigurationDetected = case(
+        replicationRegion =~ 'Default', 'Configured - verify region support',
+        detected, 'Not established - verify selected region',
+        'Not detected - verify'),
+    pairedRegionConfiguration = case(
+        replicationRegion =~ 'Default', 'Metadata Geo-DR using default paired recovery region (verify support)',
+        replicationRegion =~ 'None', 'Metadata Geo-DR disabled',
+        detected, 'Metadata Geo-DR using a selected recovery region (pairing not established)',
+        'Metadata Geo-DR (not detected; verify recovery region)'),
+    replicationRegion,
+    observedConfiguration = 'Registrations and installations are not replicated.',
+    nextAction = 'Verify replicationRegion and whether the recovery region is the Azure pair or a flexible region. None disables metadata DR. Back up and test restoration of registrations and installations separately.'

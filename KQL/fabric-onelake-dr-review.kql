@@ -1,0 +1,10 @@
+resources
+| where type =~ 'microsoft.fabric/capacities'
+| project id, name, subscriptionId, resourceGroup, location,
+    resourceType = tolower(type), service = 'Microsoft Fabric',
+    evidence = 'Needs verification',
+    pairedConfigurationDetected = 'Not assessed - verify dependencies / service settings',
+    pairedRegionConfiguration = 'OneLake paired-region DR capacity setting (not exposed by this query)',
+    capacitySku = tostring(sku.name),
+    observedConfiguration = 'Capacity inventory only; OneLake DR switch and workspace replication status REQUIRE Fabric admin verification.',
+    nextAction = 'Check the capacity DR switch and workspace OneLake geo-replication status in Fabric. Verify Fabric presence in the pair and tenant home-region dependencies; assess non-OneLake items and Power BI separately.'

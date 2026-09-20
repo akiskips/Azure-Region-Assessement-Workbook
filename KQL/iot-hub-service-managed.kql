@@ -1,0 +1,13 @@
+resources
+| where type =~ 'microsoft.devices/iothubs'
+| extend resourceType = tolower(type),
+    enableDataResidency = tostring(properties.enableDataResidency)
+| extend optedOut = enableDataResidency =~ 'true'
+| project id, name, subscriptionId, resourceGroup, location, resourceType,
+    service = 'IoT Hub',
+    evidence = iff(optedOut, 'Needs verification', 'Documented service behavior'),
+    pairedConfigurationDetected = iff(optedOut, 'No - DR opted out', 'Not exposed - service-managed; verify region support'),
+    pairedRegionConfiguration = iff(optedOut, 'Data residency enabled (paired-region DR disabled)', 'Service-managed paired-region replication (verify region support and DR opt-out)'),
+    enableDataResidency, locations = properties.locations,
+    observedConfiguration = 'Missing opt-out flag does not prove DR is enabled.',
+    nextAction = 'Verify region pairing and enableDataResidency opt-out, particularly in Brazil South and Southeast Asia. Review message loss, device reconnection and endpoint changes; failover is not permanent migration.'

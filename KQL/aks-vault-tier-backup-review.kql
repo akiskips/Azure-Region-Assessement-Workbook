@@ -1,0 +1,9 @@
+resources
+| where type =~ 'microsoft.containerservice/managedclusters'
+| project id, name, subscriptionId, resourceGroup, location,
+    resourceType = tolower(type), service = 'AKS',
+    evidence = 'Needs verification',
+    pairedConfigurationDetected = 'Not assessed - verify dependencies / service settings',
+    pairedRegionConfiguration = 'Vault-tier backups with paired-region restore (protection and vault settings not assessed)',
+    observedConfiguration = 'Cluster inventory only. Backup instances, Vault Tier recovery points, vault geo-redundancy and CRR REQUIRE Azure Backup verification.',
+    nextAction = 'Correlate the cluster with Backup vault instances and Vault Tier recovery points. Verify vault GRS, CRR, supported disks and target-region restore prerequisites; a backup extension alone is insufficient.'

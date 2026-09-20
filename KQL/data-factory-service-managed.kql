@@ -1,0 +1,11 @@
+resources
+| where type =~ 'microsoft.datafactory/factories'
+| extend resourceType = tolower(type),
+    unsupportedRegion = tolower(location) in ('brazilsouth', 'southeastasia')
+| project id, name, subscriptionId, resourceGroup, location, resourceType,
+    service = 'Data Factory',
+    evidence = iff(unsupportedRegion, 'Needs verification', 'Documented service behavior'),
+    pairedConfigurationDetected = iff(unsupportedRegion, 'Not supported in this region', 'Not exposed - service-managed; verify region support'),
+    pairedRegionConfiguration = 'Microsoft-managed metadata failover (paired regions except Brazil South and Southeast Asia)',
+    observedConfiguration = 'No customer replication flag. Core service metadata recovery does not establish integration runtime or linked data store recovery.',
+    nextAction = 'Verify paired-region eligibility; Brazil South and Southeast Asia do not support Microsoft-managed regional failover. Review Azure IR auto-resolve, self-hosted/SSIS runtimes, networking and linked stores separately.'

@@ -1,0 +1,17 @@
+resources
+| where type =~ 'microsoft.documentdb/databaseaccounts'
+| extend resourceType = tolower(type),
+    backupType = tostring(properties.backupPolicy.type),
+    periodicBackupRedundancy = tostring(properties.backupPolicy.periodicModeProperties.backupStorageRedundancy)
+| extend geoBackup = backupType =~ 'Periodic' and periodicBackupRedundancy =~ 'Geo',
+    multipleLocations = array_length(properties.locations) > 1
+| project id, name, subscriptionId, resourceGroup, location, resourceType,
+    service = 'Cosmos DB',
+    evidence = iff(geoBackup or multipleLocations, 'Detected configuration', 'Needs verification'),
+    pairedConfigurationDetected = iff(geoBackup, 'Yes', 'Not detected - verify'),
+    pairedRegionConfiguration = iff(geoBackup, 'Periodic geo-redundant backups', 'Periodic geo-redundant backups (not detected; account replicas are separate)'),
+    backupType, periodicBackupRedundancy,
+    locations = properties.locations, failoverOrder = properties.failoverPolicies,
+    automaticFailover = tostring(properties.enableAutomaticFailover),
+    multiWrite = tostring(properties.enableMultipleWriteLocations),
+    nextAction = 'Verify periodic backup redundancy and restore eligibility; a missing redundancy property does not confirm the Geo default. Inspect ALL account locations, write region, failover priorities, consistency and SDK preferred regions separately.'

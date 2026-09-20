@@ -1,0 +1,11 @@
+resources
+| where type in~ ('microsoft.web/sites', 'microsoft.web/hostingenvironments')
+| where kind !contains 'functionapp'
+| project id, name, subscriptionId, resourceGroup, location,
+    resourceType = tolower(type), service = 'App Service / Environment',
+    evidence = 'Needs verification',
+    pairedConfigurationDetected = 'Not assessed - verify dependencies / service settings',
+    pairedRegionConfiguration = 'Custom backups to geo-redundant storage (backup configuration and storage not assessed)',
+    kind,
+    observedConfiguration = 'Custom backup schedule, recovery points and destination storage redundancy REQUIRE App Service API verification.',
+    nextAction = 'Enumerate apps and custom backups, then verify destination storage geo-redundancy and restore support. Environment existence and automatic backups do not prove cross-region protection.'

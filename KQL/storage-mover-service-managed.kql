@@ -1,0 +1,9 @@
+resources
+| where type =~ 'microsoft.storagemover/storagemovers'
+| project id, name, subscriptionId, resourceGroup, location,
+    resourceType = tolower(type), service = 'Storage Mover',
+    evidence = 'Documented service behavior',
+    pairedConfigurationDetected = 'Not exposed - service-managed; verify region support',
+    pairedRegionConfiguration = 'Microsoft-managed configuration metadata replication to the paired region',
+    observedConfiguration = 'Documented configuration metadata replication only; migrated data, source/target storage and agents have separate recovery requirements.',
+    nextAction = 'Verify paired-region eligibility, endpoint storage redundancy and agent recovery. Re-register agents after Microsoft-managed failover; metadata replication does not protect migrated data.'

@@ -1,0 +1,18 @@
+resources
+| where type in~ ('microsoft.eventgrid/topics', 'microsoft.eventgrid/domains', 'microsoft.eventgrid/systemtopics')
+| where kind !~ 'AzureArc'
+| extend resourceType = tolower(type),
+    dataResidencyBoundary = tostring(properties.dataResidencyBoundary)
+| extend systemTopic = resourceType == 'microsoft.eventgrid/systemtopics',
+    detected = resourceType in ('microsoft.eventgrid/topics', 'microsoft.eventgrid/domains') and dataResidencyBoundary =~ 'WithinGeopair'
+| project id, name, subscriptionId, resourceGroup, location, resourceType,
+    service = 'Event Grid',
+    evidence = case(detected, 'Detected configuration', systemTopic, 'Documented service behavior', 'Needs verification'),
+    pairedConfigurationDetected = case(systemTopic, 'Not exposed - service-managed; verify region support', detected, 'Yes', 'Not detected - verify'),
+    pairedRegionConfiguration = case(
+        systemTopic, 'Service-managed metadata Geo-DR (system topic; paired regions only)',
+        detected, 'Metadata Geo-DR (WithinGeopair; event data is not replicated)',
+        dataResidencyBoundary =~ 'WithinRegion', 'Regional metadata only (Geo-DR disabled)',
+        'Metadata Geo-DR (not detected; verify data residency boundary)'),
+    dataResidencyBoundary,
+    nextAction = 'Verify paired-region support and Cross-Geo vs Regional setting through the service API. System topics are service-managed; namespaces are excluded. Protect event payloads with durable sources and dead-letter storage.'

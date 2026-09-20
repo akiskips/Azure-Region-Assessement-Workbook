@@ -2,6 +2,8 @@
 
 An Azure Monitor workbook for discovering resources, reviewing their regional distribution, and inspecting selected paired-region configurations before planning a regional migration. It uses read-only Azure Resource Graph queries; it does not migrate or modify resources.
 
+Use the workbook for interactive discovery across subscriptions, or run the [16 standalone service queries](KQL/README.md) directly in Resource Graph Explorer. The workbook includes a general **Discovery** view and a **Paired region specific services** view with checkbox-based service selection.
+
 ## Disclaimer
 
 **This is a user-created project, not an official Microsoft product. It is not endorsed, supported, or maintained by Microsoft.**
@@ -31,12 +33,13 @@ Saving the workbook does not grant other viewers access to your resources. Each 
 | Control | Behavior |
 | --- | --- |
 | Subscriptions | Sets the subscription scope for Resource Graph queries. |
-| Source regions | Filters resources by their indexed location. Global and unlocated resources are retained. Backup and ASR queries also consider vault and indexed replication locations. |
-| Planned target region (context only) | Records planning context; it does not filter results or validate target availability, quotas, recovery destinations, or migration support. Defaults to `swedencentral`. |
+| Source regions | Filters resources by their indexed location. Global and unlocated resources are retained. The paired-region view also considers Cosmos DB account locations; Backup and ASR queries also consider vault and indexed replication locations. |
 | Resource groups | Narrows the inventory and configuration queries. |
 | View | Switches between **Discovery** and **Paired region specific services**. |
-| Service | Filters only the paired-region view. Defaults to **All**. |
+| Services | Checkbox multi-select dropdown for the paired-region view. Select one or more services, or **All** (the default). |
 | Evidence | Filters only the paired-region view by detected configuration, documented behavior, or items needing verification. |
+
+There is no target-region selector. This workbook assesses existing resources and configuration evidence; it does not check destination service availability, SKU support, quota, or restore eligibility. Verify these separately for your intended destination.
 
 ### Discovery
 
@@ -46,14 +49,49 @@ Use table filtering to inspect returned rows and the table's Excel export action
 
 ### Paired Region Specific Services
 
-Review Storage, Backup vaults, SQL, Key Vault, and PostgreSQL/MySQL. The **Resources by service and evidence** table shows one row per resource, with its name, evidence, paired-configuration detection status, configuration type (such as GRS), and resource link. The follow-up table exposes additional observed properties and verification actions.
+Review the 16 service groups below. The **Resources by service and evidence** table shows one row per indexed resource, with its name, evidence, paired-configuration detection status, configuration type (such as GRS), and resource link. The follow-up table exposes additional observed properties and verification actions.
 
 - **Detected configuration** means selected configuration properties were observed in Resource Graph. It does not prove successful replication or restore.
-- **Documented service behavior** identifies Key Vault's service-managed behavior, not an observed customer-controlled replication setting. Regional exceptions apply.
+- **Documented service behavior** identifies service-managed recovery, not an observed customer-controlled replication setting. This category covers Key Vault, eligible Data Factory candidates, Device Registry, Event Grid system topics, IoT Hub candidates without an observed DR opt-out, and Storage Mover. It does not confirm that the resource's region supports the behavior.
 - **Needs verification** means the query did not find its selected configuration signals. Missing or unindexed properties do not prove a feature is disabled.
-- **Paired configuration detected** is narrower than Evidence. For example, a PostgreSQL/MySQL read replica can produce detected evidence without proving paired-region geo-backups are enabled.
+- **Paired configuration detected** is narrower than Evidence. PostgreSQL/MySQL and Cosmos DB replicas can produce detected evidence without proving paired-region geo-backups are enabled. A selected Notification Hubs recovery region does not establish Azure pairing.
+- **Not assessed** identifies dependencies or service settings the query cannot validate, including App Service backups, AKS backup protection, Storage Actions target accounts, and Fabric capacity DR settings. These resources remain **Needs verification**.
 
-SQL replicas and PostgreSQL/MySQL read replicas are separate from backup pairing and can use independently selected regions. Service inclusion alone does not mean geo-redundancy is enabled.
+Coverage is based on [Azure services that support multiple regions](https://learn.microsoft.com/azure/reliability/regions-multiregion-support?tabs=built-in-multiregion-support), reviewed on 2026-09-20. The view focuses on features that use Azure region pairs, including dependent storage and backup configurations. A checkmark in the source's **Paired regions** column means a feature can operate between paired regions, not necessarily that it requires a fixed Azure pair.
+
+| Service group | Paired-region feature and assessment |
+| --- | --- |
+| Storage | Detects Standard GRS, RA-GRS, GZRS and RA-GZRS account SKUs. Covers account-level redundancy for Blob Storage, ADLS Gen2, Files, Queue and Table Storage, subject to service/account support. |
+| Backup | Detects indexed vault geo-redundancy or Cross Region Restore (CRR). Workload protection and recovery points require separate verification. |
+| SQL | Detects current Geo/GeoZone backup redundancy for SQL Database and Managed Instance resources; requested redundancy and customer-selected replicas do not prove paired backups. |
+| Key Vault | Documents service-managed replication with regional exceptions. Managed HSM is excluded because it has a separate multiregion model. |
+| PostgreSQL / MySQL | Detects flexible-server geo-backups separately from read replicas. |
+| [Cosmos DB](https://learn.microsoft.com/azure/cosmos-db/periodic-backup-storage-redundancy) | Detects explicit `Periodic` backup policy with `Geo` redundancy. Missing properties do not confirm the documented default; account replica locations are separate. |
+| [Data Factory](https://learn.microsoft.com/azure/reliability/reliability-data-factory) | Documents Microsoft-managed metadata failover in paired regions. Brazil South and Southeast Asia are flagged as unsupported; integration runtimes and linked stores require separate recovery planning. |
+| [Device Registry](https://learn.microsoft.com/azure/reliability/reliability-device-registry) | Inventories namespaces, legacy assets/asset endpoint profiles and schema registries for documented service-managed paired replication. Verify current regional eligibility and dependent services. |
+| [Event Grid](https://learn.microsoft.com/azure/reliability/reliability-event-grid) | Detects `dataResidencyBoundary=WithinGeopair` for custom topics/domains; system topics use documented behavior. `WithinRegion` disables Geo-DR. Namespaces and Azure Arc topics are excluded. Only metadata is replicated, not event data. |
+| [IoT Hub](https://learn.microsoft.com/azure/reliability/reliability-iot-hub) | Documents paired-region recovery and exposes the `enableDataResidency` flag. An observed `true` flags DR opt-out; missing/false values alone do not prove eligible regional replication. |
+| [Notification Hubs](https://learn.microsoft.com/azure/reliability/reliability-notification-hubs) | Inspects namespace `replicationRegion`: `Default` requests the default paired recovery region, `None` disables metadata DR, and named flexible regions require pairing verification. Registrations and installations are not replicated. |
+| [Storage Actions](https://learn.microsoft.com/azure/reliability/reliability-storage-actions) | Inventories storage tasks. Continuity depends on each assignment's target storage account geo-redundancy, which this query does not correlate or validate. |
+| [Storage Mover](https://learn.microsoft.com/azure/reliability/reliability-storage-mover) | Documents Microsoft-managed configuration metadata replication in paired regions. Source/target data and agents need separate protection; agents require re-registration after failover. |
+| [Microsoft Fabric](https://learn.microsoft.com/azure/reliability/reliability-fabric) | Inventories Azure Fabric capacities only. Check the OneLake DR capacity switch, workspace replication status, service presence in the pair and tenant home-region dependencies in Fabric. Power BI and non-OneLake items have separate behavior. |
+| [App Service / Environment](https://learn.microsoft.com/azure/app-service/manage-backup) | Inventories apps and App Service Environments, excluding Function Apps. Verify custom backups and their destination account's geo-redundancy; neither app nor environment existence proves protection. |
+| [AKS](https://learn.microsoft.com/azure/backup/azure-kubernetes-service-backup-overview) | Inventories clusters for Vault Tier backup review. Verify backup instances, recovery points, vault GRS/CRR and restore prerequisites. This is not cross-region cluster replication. |
+
+The workbook does not compute or validate region pairs. Service inclusion alone does not mean geo-redundancy is enabled. SQL, PostgreSQL/MySQL and Cosmos DB replicas are separate from backup pairing and can use independently selected regions.
+
+Services whose listed capabilities use customer-selected regions, such as API Management, App Configuration, Container Registry, Event Hubs, Service Bus, Managed Redis, Monitor Logs, NetApp Files, SignalR, Web PubSub and Managed HSM, are not added merely because they can operate across a pair. Nonregional services such as DNS, Front Door, Traffic Manager and Entra ID are also outside this view. Site Recovery and VM replication remain in **Discovery > Backup and ASR**. Standalone queries in [KQL/README.md](KQL/README.md) cover all 16 service groups, with configuration filters or inventory requiring verification as documented in that folder.
+
+## Standalone Service Queries
+
+The [KQL query index](KQL/README.md) provides one read-only query for each of the 16 service groups. These queries run independently of the workbook and require no workbook parameter substitution.
+
+1. Open **Resource Graph Explorer** in the Azure portal.
+2. Select the subscriptions you want to inspect.
+3. Open a query from the index, paste its contents into the query editor, and select **Run query**.
+4. Review its evidence and configuration fields, then verify findings using the relevant service APIs.
+
+Standalone queries include all regions and resource groups in the selected subscription scope by default. See the index for optional filters and service-specific caveats. Storage, Backup, SQL and PostgreSQL/MySQL queries filter matching configuration signals; the other queries include inventory for service-managed recovery or further verification. Their results are therefore not always identical to the workbook's broader inventory.
 
 ## Limits and Troubleshooting
 
@@ -62,9 +100,8 @@ SQL replicas and PostgreSQL/MySQL read replicas are separate from backup pairing
 - Resource location metadata is not a complete map of data residency, dependencies, replicas, or failover destinations.
 - Empty results: check subscription access, source regions, resource groups, and (in the paired-region view) Service and Evidence selections.
 - Backup and ASR results require workload-level verification of recovery points, restore permissions, retention, and replication health.
-- The target-region list is static and may not reflect every current region or service restriction.
 - Treat exported results as potentially sensitive inventory. Do not publish subscription details, resource identifiers, tags, or backup information without authorization.
-- Local build and structural checks have been performed; live query execution and portal rendering have not been comprehensively validated.
+- Local workbook build and structural checks have passed. All 16 standalone queries passed Kusto syntax parsing and checks for workbook-placeholder absence and service coverage. These checks do not establish Azure Resource Graph runtime compatibility; live query execution and portal rendering have not been comprehensively validated.
 
 ## Repository Files
 
@@ -74,6 +111,7 @@ SQL replicas and PostgreSQL/MySQL read replicas are separate from backup pairing
 | [Build-Workbook.ps1](Build-Workbook.ps1) | Workbook generator and source for layout, controls, and table definitions. |
 | [discovery.kql](discovery.kql) | Shared service-configuration discovery query. |
 | [backup-context.kql](backup-context.kql) | Backup and ASR discovery query. |
+| [KQL/README.md](KQL/README.md) | Index and usage guidance for 16 standalone per-service queries; these are not consumed by the workbook generator. |
 
 To customize the workbook, edit the generator or KQL sources, then run this command from the repository directory in PowerShell 7 or later:
 
@@ -81,10 +119,12 @@ To customize the workbook, edit the generator or KQL sources, then run this comm
 ./Build-Workbook.ps1
 ```
 
-This overwrites the generated workbook JSON. Reimport the updated JSON through Advanced Editor. The KQL files contain workbook parameter placeholders and require substitution before running them directly in Resource Graph Explorer.
+This overwrites the generated workbook JSON. Reimport the updated JSON through Advanced Editor. The root-level [discovery.kql](discovery.kql) and [backup-context.kql](backup-context.kql) templates contain workbook parameter placeholders and require substitution before running them directly in Resource Graph Explorer. The standalone queries listed in [KQL/README.md](KQL/README.md) do not contain those placeholders. Changes to standalone queries do not update the workbook; keep corresponding service logic aligned when customizing either version.
 
 ## References
 
+- [Azure services that support multiple regions](https://learn.microsoft.com/azure/reliability/regions-multiregion-support?tabs=built-in-multiregion-support)
+- [Azure region pairs and nonpaired regions](https://learn.microsoft.com/azure/reliability/regions-paired)
 - [Azure Monitor Workbooks overview](https://learn.microsoft.com/azure/azure-monitor/visualize/workbooks-overview)
 - [Manage Azure workbooks](https://learn.microsoft.com/azure/azure-monitor/visualize/workbooks-manage)
 - [Azure Resource Graph overview and permissions](https://learn.microsoft.com/azure/governance/resource-graph/overview)

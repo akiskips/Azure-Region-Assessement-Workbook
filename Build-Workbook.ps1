@@ -3,8 +3,13 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$pairedRegionServices = @(
+    'Storage', 'Backup', 'SQL', 'Key Vault', 'PostgreSQL / MySQL', 'Cosmos DB',
+    'Data Factory', 'Device Registry', 'Event Grid', 'IoT Hub', 'Notification Hubs',
+    'Storage Actions', 'Storage Mover', 'Microsoft Fabric', 'App Service / Environment', 'AKS'
+)
 $discovery = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'discovery.kql') -Raw).Trim()
-$discovery += "`n| where service in ('Storage', 'Backup', 'SQL', 'Key Vault', 'PostgreSQL / MySQL')"
+$discovery += "`n| where service in ('$($pairedRegionServices -join "', '")')"
 $backup = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'backup-context.kql') -Raw).Trim()
 
 function New-TextItem([string]$Name, [string]$Text) {
@@ -108,24 +113,24 @@ $items.Add(@{
                 typeSettings = @{ limitSelectTo = 1000; additionalResourceOptions = @('value::5'); includeAll = $true }
             }
             (New-ScopedPicker 'SourceRegions' 'Source regions' 'Resources | where isnotempty(location) | project value = tolower(location), label = tolower(location) | distinct value, label | order by label asc')
-            (New-Choice 'TargetRegion' 'Planned target region (context only)' @(
-                'australiacentral', 'australiacentral2', 'australiaeast', 'australiasoutheast',
-                'austriaeast', 'brazilsouth', 'brazilsoutheast', 'canadacentral', 'canadaeast',
-                'centralindia', 'centralus', 'chilecentral', 'eastasia', 'eastus', 'eastus2',
-                'francecentral', 'francesouth', 'germanynorth', 'germanywestcentral',
-                'indonesiacentral', 'israelcentral', 'italynorth', 'japaneast', 'japanwest',
-                'jioindiacentral', 'jioindiawest', 'koreacentral', 'koreasouth',
-                'malaysiawest', 'mexicocentral', 'newzealandnorth', 'northcentralus',
-                'northeurope', 'norwayeast', 'norwaywest', 'polandcentral', 'qatarcentral',
-                'southafricanorth', 'southafricawest', 'southcentralus', 'southeastasia',
-                'southindia', 'spaincentral', 'swedencentral', 'swedensouth',
-                'switzerlandnorth', 'switzerlandwest', 'uaecentral', 'uaenorth',
-                'uksouth', 'ukwest', 'westcentralus', 'westeurope', 'westindia',
-                'westus', 'westus2', 'westus3'
-            ) 'swedencentral')
             (New-ScopedPicker 'ResourceGroups' 'Resource groups' 'Resources | where isnotempty(resourceGroup) | project value = resourceGroup, label = resourceGroup | distinct value, label | order by label asc')
             (New-Choice 'View' 'View' @('Discovery', 'Paired region specific services') 'Discovery')
-            (New-Choice 'Service' 'Service (paired-region view only)' @('All', 'Storage', 'Backup', 'SQL', 'Key Vault', 'PostgreSQL / MySQL') 'All' -WithoutDefaultItems)
+            @{
+                id = 'Service'
+                version = 'KqlParameterItem/1.0'
+                name = 'Service'
+                label = 'Services (paired-region view only)'
+                type = 2
+                isRequired = $true
+                multiSelect = $true
+                quote = "'"
+                delimiter = ','
+                value = @('value::all')
+                typeSettings = @{ additionalResourceOptions = @('value::all'); selectAllValue = '*' }
+                jsonData = ConvertTo-Json -InputObject @($pairedRegionServices | ForEach-Object {
+                    [ordered]@{ value = $_; label = $_ }
+                }) -Compress
+            }
             (New-Choice 'Evidence' 'Evidence (paired-region view only)' @('All', 'Detected configuration', 'Documented service behavior', 'Needs verification') 'All')
         )
     }
@@ -156,11 +161,13 @@ $items.Add((New-QueryItem 'inventory-detail' 'Discovered resources' ($scopeQuery
 $items.Add((New-TextItem 'scope-warning' @'
 ## Paired region specific services
 
-Storage, Backup vaults, SQL, Key Vault, and PostgreSQL/MySQL services with paired-region features or service-managed replication. Inclusion does not prove that geo-redundancy is enabled. SQL and PostgreSQL/MySQL replicas can use customer-selected regions independently of backup pairing; Key Vault has regional exceptions.
+Paired-region features and dependencies from [Azure services that support multiple regions](https://learn.microsoft.com/azure/reliability/regions-multiregion-support?tabs=built-in-multiregion-support): Storage, Backup, SQL, Key Vault, PostgreSQL/MySQL, Cosmos DB, Data Factory, Device Registry, Event Grid, IoT Hub, Notification Hubs, Storage Actions, Storage Mover, Microsoft Fabric, App Service/Environment, and AKS.
 
-Missing properties and unindexed relationships require verification; they do not prove a feature is disabled. Counts precede the **1,000-row** detail cap. The planned target region does not validate service availability or recovery access.
+Inclusion does not prove geo-redundancy is enabled or supported in the resource's region. Service-managed behavior requires regional verification. Event Grid and Notification Hubs protect metadata, not event payloads or device registrations. App Service, AKS, Storage Actions and Fabric need dependent-resource or service-level checks. Customer-selected replicas are separate from paired backups; flexible Notification Hubs recovery regions do not establish Azure pairing.
 
-**Paired configuration detected** refers only to observed paired-region settings. **Not detected - verify** is not proof of a disabled feature. Evidence can report a detected read replica even when paired geo-backups are not detected.
+Missing properties and unindexed relationships require verification; they do not prove a feature is disabled. Counts precede the **1,000-row** detail cap. Target service availability and recovery access require separate verification.
+
+**Paired configuration detected** refers only to observed paired-region settings, not replication health or regional eligibility. **Not detected - verify** is not proof of a disabled feature. Evidence can report a detected replica or flexible recovery region without proving a paired configuration. **Not assessed** identifies dependencies or settings this query cannot validate.
 '@))
 $items.Add((New-QueryItem 'candidate-count' 'Configuration discovery counts' ($discovery + @'
 
