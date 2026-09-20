@@ -2,7 +2,7 @@
 
 An Azure Monitor workbook for discovering resources, reviewing their regional distribution, and inspecting selected paired-region configurations before planning a regional migration. It uses read-only Azure Resource Graph queries; it does not migrate or modify resources.
 
-Use the workbook for interactive discovery across subscriptions, or run the [16 standalone service queries](KQL/README.md) directly in Resource Graph Explorer. The workbook includes a general **Discovery** view and a **Paired region specific services** view with checkbox-based service selection.
+Use the workbook for interactive discovery across subscriptions, or run the [16 standalone service queries](KQL/README.md) directly in Resource Graph Explorer. The workbook includes a general **Discovery** view and a **Paired region specific services** view with checkbox-based service selection. Both views support checkbox-based tag filtering with **Any** or **All** matching to narrow results by environment, owner, cost center, or other indexed resource tags.
 
 ## Disclaimer
 
@@ -47,7 +47,18 @@ There is no target-region selector. This workbook assesses existing resources an
 
 Tag filtering uses the checkbox picker only; custom key/value entry is not supported. Reimport the updated workbook JSON to add the tag controls to an existing workbook.
 
-Select tag pairs such as `environment = production` and `owner = platform`, then choose **Any** or **All** under **Match selected tags**. To select several values for one key, such as production or staging, use **Any**. Requiring both values with **All** normally returns no resources because a tag key has one value.
+1. Select the subscriptions to inspect, then open **Tags (key = value)**.
+2. Replace the default **All** selection with one or more tag pairs, such as `environment = production` and `owner = platform`.
+3. Set **Match selected tags** to **Any** or **All**. The resource counts and detail tables use the same tag filter.
+
+With those two example pairs selected:
+
+| Match selected tags | Included resources |
+| --- | --- |
+| **Any** | Resources tagged `environment = production`, `owner = platform`, or both. |
+| **All** | Resources carrying both `environment = production` and `owner = platform`. |
+
+To select several values for one key, such as production or staging, use **Any**. Requiring both values with **All** normally returns no resources because a tag key has one value. To reset the filter, select **All** in the **Tags (key = value)** picker; this is separate from the **All** match mode.
 
 Tag keys are matched case-insensitively and shown in lowercase; values are matched exactly, including case. Empty tag values are supported. Selecting **All** in the Tags picker turns filtering off regardless of the match mode. With specific pairs selected, untagged resources are excluded. Tags are read from the resource itself, not inherited from its subscription or resource group.
 
